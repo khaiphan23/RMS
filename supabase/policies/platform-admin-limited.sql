@@ -1,0 +1,1 @@
+-- RLS: platform_admin chỉ đọc bảng platform-data; không đọc orders/payments/staff/menu.

@@ -1,0 +1,1 @@
+-- [store-data] stores_profile: hồ sơ/cấu hình riêng của quán. FK tới store_registry (0001) nên 0001 phải chạy trước.

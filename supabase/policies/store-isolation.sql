@@ -1,0 +1,1 @@
+-- RLS: dữ liệu quán chỉ owner/nhân viên cùng quán được đọc/ghi.

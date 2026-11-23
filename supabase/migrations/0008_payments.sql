@@ -1,0 +1,1 @@
+-- [store-data] payments: ghi nhận thanh toán thủ công, tách khỏi trạng thái đơn.

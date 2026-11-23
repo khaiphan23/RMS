@@ -1,0 +1,1 @@
+-- [platform-data] store_registry: bảng gốc của quán, tạo đầu tiên; mọi bảng store-data tham chiếu id ở đây. Dữ liệu phục vụ thuê dịch vụ (Q8).
