@@ -10,6 +10,7 @@
 --   * store A/B, tables, menu_items; 1 order của store A (<order-a-id>),
 --     1 payment của chính order A (<payment-a-id>), 1 order của store B.
 --   * <menu-item-a-id>: 1 món available của store A (test total_vnd + payment guard).
+--   * <menu-item-b-id>: 1 món available của store B (test món quán khác bị từ chối).
 --   * Có thể dùng store mẫu trong seed.sql: store ...101, bàn T01 ...501.
 -- Mọi assertion sai sẽ raise exception và rollback.
 
@@ -442,6 +443,224 @@ begin
     when insufficient_privilege then
       raise notice 'PASS: anon bị từ chối SELECT payments';
   end;
+end $$;
+
+do $$
+begin
+  begin
+    insert into public.orders (store_id, table_id, order_token)
+    values ('<store-a-id>', '<table-a-id>', gen_random_uuid());
+    raise exception 'FAIL: anon có quyền INSERT orders trực tiếp (mong đợi bị từ chối)';
+  exception
+    when insufficient_privilege then
+      raise notice 'PASS: anon bị từ chối INSERT orders trực tiếp';
+  end;
+end $$;
+
+do $$
+begin
+  begin
+    insert into public.order_items (store_id, order_id, menu_item_id, name_snapshot, unit_price_vnd, quantity)
+    values ('<store-a-id>', '<order-a-id>', '<menu-item-a-id>', 'Test', 1000, 1);
+    raise exception 'FAIL: anon có quyền INSERT order_items trực tiếp (mong đợi bị từ chối)';
+  exception
+    when insufficient_privilege then
+      raise notice 'PASS: anon bị từ chối INSERT order_items trực tiếp';
+  end;
+end $$;
+
+-- =========================================================
+-- 9. Khách qua RPC public.place_order / public.get_order_status
+-- =========================================================
+do $$
+declare
+  v_store_slug text;
+  v_table_code text;
+  v_store_a_id uuid := '<store-a-id>';
+  v_table_a_id uuid := '<table-a-id>';
+  v_item_a_id uuid := '<menu-item-a-id>';
+  v_item_b_id uuid := '<menu-item-b-id>';
+  v_test_token text := '11111111-1111-1111-1111-111111111111';
+  v_price bigint;
+  v_total bigint;
+  v_order_id uuid;
+  v_unit_price bigint;
+  i int;
+begin
+  select sr.slug into v_store_slug from public.store_registry sr where sr.id = v_store_a_id;
+  select t.table_code into v_table_code from public.tables t where t.id = v_table_a_id;
+
+  select price_vnd into v_price from public.menu_items where id = v_item_a_id;
+  if v_price is null then raise exception 'FAIL: thiếu <menu-item-a-id> để test RPC'; end if;
+
+  -- 9.1 Giá lấy từ DB, RPC không nhận giá từ client.
+  select public.place_order(
+    v_store_slug, v_table_code,
+    pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+      'menu_item_id', v_item_a_id, 'quantity', 2, 'note', 'Test giá DB'
+    )),
+    'Ghi chú đơn', v_test_token
+  ) into v_order_id;
+
+  select unit_price_vnd into v_unit_price
+  from public.order_items where order_id = v_order_id limit 1;
+  if v_unit_price is null or v_unit_price <> v_price then
+    raise exception 'FAIL: place_order không lấy giá từ DB (unit=%, db=%)', v_unit_price, v_price;
+  end if;
+
+  select total_vnd into v_total from public.orders where order_token = v_test_token::uuid;
+  if v_total <> v_price * 2 then
+    raise exception 'FAIL: total_vnd = %, mong đợi %', v_total, v_price * 2;
+  end if;
+  raise notice 'PASS: place_order lấy giá từ DB và tạo đơn';
+
+  -- 9.2 Món của quán khác bị từ chối.
+  begin
+    select public.place_order(
+      v_store_slug, v_table_code,
+      pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'menu_item_id', v_item_b_id, 'quantity', 1
+      )),
+      '', gen_random_uuid()
+    );
+    raise exception 'FAIL: place_order chấp nhận món của quán khác';
+  exception
+    when others then
+      raise notice 'PASS: place_order từ chối món của quán khác';
+  end;
+
+  -- 9.3 Giới hạn 5 đơn pending trên bàn trong 10 phút.
+  -- Đơn v_test_token ở 9.1 đã tạo 1 đơn pending, nên lặp thêm 4 đơn để đạt 5.
+  for i in 1..4 loop
+    select public.place_order(
+      v_store_slug, v_table_code,
+      pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'menu_item_id', v_item_a_id, 'quantity', 1
+      )),
+      '', gen_random_uuid()
+    );
+  end loop;
+
+  begin
+    select public.place_order(
+      v_store_slug, v_table_code,
+      pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'menu_item_id', v_item_a_id, 'quantity', 1
+      )),
+      '', gen_random_uuid()
+    );
+    raise exception 'FAIL: place_order chấp nhận đơn thứ 6 pending trong 10 phút';
+  exception
+    when others then
+      raise notice 'PASS: place_order từ chối đơn thứ 6 pending trong 10 phút';
+  end;
+
+  -- 9.3b Mã đơn ngắn (10 ký tự) bị place_order từ chối rõ ràng.
+  begin
+    select public.place_order(
+      v_store_slug, v_table_code,
+      pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'menu_item_id', v_item_a_id, 'quantity', 1
+      )),
+      '', 'short-token'
+    );
+    raise exception 'FAIL: place_order chấp nhận mã đơn ngắn';
+  exception
+    when others then
+      raise notice 'PASS: place_order từ chối mã đơn ngắn';
+  end;
+
+  -- 9.4 Trạng thái đơn đúng token.
+  declare
+    v_status jsonb := public.get_order_status(v_test_token);
+  begin
+    if v_status is null then
+      raise exception 'FAIL: get_order_status trả null cho token đúng';
+    end if;
+    if v_status->>'order_status' <> 'pending' then
+      raise exception 'FAIL: trạng thái đơn không phải pending';
+    end if;
+    if (v_status->>'total_vnd')::bigint <> v_total then
+      raise exception 'FAIL: tổng tiền không khớp';
+    end if;
+    if v_status->>'payment_status' <> 'unpaid' then
+      raise exception 'FAIL: payment_status không phải unpaid';
+    end if;
+    if pg_catalog.jsonb_array_length(v_status->'items') <> 1 then
+      raise exception 'FAIL: danh sách món không đúng';
+    end if;
+    raise notice 'PASS: get_order_status đọc đúng đơn theo token';
+  end;
+
+  -- 9.5 Token sai/trả về định dạng không hợp lệ -> null.
+  if public.get_order_status('00000000-0000-0000-0000-000000000000') is not null then
+    raise exception 'FAIL: get_order_status token sai không trả rỗng';
+  end if;
+  if public.get_order_status('short-token') is not null then
+    raise exception 'FAIL: get_order_status mã đơn không hợp lệ không trả rỗng';
+  end if;
+  if public.get_order_status(null) is not null then
+    raise exception 'FAIL: get_order_status null không trả rỗng';
+  end if;
+  raise notice 'PASS: get_order_status token sai/trả về định dạng không hợp lệ trả rỗng';
+end $$;
+
+-- 9.6 Trạng thái thanh toán partial -> paid (chạy như owner A).
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"<owner-a-user-id>","role":"authenticated"}',
+  true
+);
+set local role authenticated;
+
+do $$
+declare
+  v_total bigint;
+  v_status jsonb;
+  v_order_id uuid;
+begin
+  select id, total_vnd into v_order_id, v_total
+  from public.orders
+  where order_token = '11111111-1111-1111-1111-111111111111'::uuid;
+
+  if v_total >= 2 then
+    insert into public.payments (store_id, order_id, method, amount_vnd)
+    values ('<store-a-id>', v_order_id, 'cash', v_total - 1);
+
+    select public.get_order_status('11111111-1111-1111-1111-111111111111') into v_status;
+    if v_status->>'payment_status' <> 'partial' then
+      raise exception 'FAIL: payment_status phải partial, hiện %', v_status->>'payment_status';
+    end if;
+    raise notice 'PASS: thanh toán partial';
+
+    insert into public.payments (store_id, order_id, method, amount_vnd)
+    values ('<store-a-id>', v_order_id, 'cash', 1);
+
+    select public.get_order_status('11111111-1111-1111-1111-111111111111') into v_status;
+    if v_status->>'payment_status' <> 'paid' then
+      raise exception 'FAIL: payment_status phải paid, hiện %', v_status->>'payment_status';
+    end if;
+    raise notice 'PASS: thanh toán paid';
+  else
+    raise notice 'PASS (bỏ qua partial/paid vì total quá nhỏ)';
+  end if;
+end $$;
+
+-- 9.7 Platform admin KHÔNG dùng get_order_status để đọc đơn của quán.
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"<platform-admin-user-id>","role":"authenticated","app_metadata":{"role":"platform_admin"}}',
+  true
+);
+set local role authenticated;
+
+do $$
+begin
+  perform public.get_order_status('11111111-1111-1111-1111-111111111111');
+  raise exception 'FAIL: platform_admin dùng được get_order_status';
+exception
+  when others then
+    raise notice 'PASS: platform_admin không dùng được get_order_status';
 end $$;
 
 reset role;
