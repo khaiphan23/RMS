@@ -1,3 +1,4 @@
+-- THAM KHẢO LỖI THỜI: bản chính nằm ở supabase/migrations 0013, 0015, 0016
 -- Bản chính nằm ở supabase/migrations/0013_rls_store_isolation.sql; file này chỉ để tham chiếu, db push không chạy.
 -- RLS nhóm store-data — bản chính, db push chạy file này (bản tham chiếu: supabase/policies/store-isolation.sql).
 -- Chạy sau 0012; không phụ thuộc 0014.

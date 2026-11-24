@@ -1,3 +1,4 @@
+-- THAM KHẢO LỖI THỜI: bản chính nằm ở supabase/migrations 0013, 0015, 0016
 -- Bản chính nằm ở supabase/migrations/0014_rls_platform_admin_limited.sql; file này chỉ để tham chiếu, db push không chạy.
 -- Platform admin chỉ đọc platform-data (Q8) — bản chính, db push chạy file này.
 -- Bản tham chiếu: supabase/policies/platform-admin-limited.sql

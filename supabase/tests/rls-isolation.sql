@@ -7,7 +7,7 @@
 --     waiter A, kitchen A. Không tạo bằng SQL, dùng Dashboard.
 --   * staff_members active: owner A + waiter A + kitchen A thuộc store A; owner B thuộc store B.
 --   * store A/B, tables, menu_items; 1 order của store A (<order-a-id>),
---     1 payment của store A (<payment-a-id>), 1 order của store B.
+--     1 payment của chính order A (<payment-a-id>), 1 order của store B.
 --   * <menu-item-a-id>: 1 món available của store A (test total_vnd).
 --   * Có thể dùng store mẫu trong seed.sql: store ...101, bàn T01 ...501.
 -- Mọi assertion sai sẽ raise exception và rollback.
@@ -148,7 +148,7 @@ begin
 end $$;
 
 -- =========================================================
--- 3. Waiter A: không xoá được payments
+-- 3. Waiter A: không xoá được payments, không sửa được total_vnd
 -- =========================================================
 select set_config(
   'request.jwt.claims',
@@ -159,11 +159,27 @@ select set_config(
 do $$
 declare n int;
 begin
-  delete from public.payments where id = '<payment-a-id>';
-  get diagnostics n = row_count;
-  if n <> 0 then raise exception 'FAIL: waiter xoá được payment'; end if;
+  begin
+    delete from public.payments where id = '<payment-a-id>';
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL: waiter xoá được payment'; end if;
+  exception
+    when insufficient_privilege then
+      null; -- 0016 revoke DELETE payments khỏi authenticated
+  end;
 
   raise notice 'PASS: waiter không xoá được payment';
+end $$;
+
+do $$
+begin
+  begin
+    update public.orders set total_vnd = total_vnd + 1 where id = '<order-a-id>';
+    raise exception 'FAIL: waiter sửa được total_vnd';
+  exception
+    when insufficient_privilege then
+      raise notice 'PASS: waiter bị chặn sửa total_vnd';
+  end;
 end $$;
 
 -- =========================================================
@@ -228,7 +244,21 @@ begin
 end $$;
 
 -- =========================================================
--- 6. Khách (anon): chỉ đọc menu; orders/payments bị từ chối
+-- 6. Owner A: không xoá được đơn đã có payment (FK RESTRICT)
+-- =========================================================
+do $$
+begin
+  begin
+    delete from public.orders where id = '<order-a-id>';
+    raise exception 'FAIL: owner A xoá được đơn có payment';
+  exception
+    when foreign_key_violation then
+      raise notice 'PASS: owner A bị chặn xoá đơn có payment';
+  end;
+end $$;
+
+-- =========================================================
+-- 7. Khách (anon): chỉ đọc menu; orders/payments bị từ chối
 -- =========================================================
 reset role;
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
