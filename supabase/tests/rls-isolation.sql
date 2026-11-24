@@ -1,6 +1,7 @@
 -- Kiểm tra RLS thủ công trên DB test (Supabase local/staging), KHÔNG chạy production.
 -- Cách chạy: psql "$DATABASE_URL" -f supabase/tests/rls-isolation.sql
 --       hoặc dán vào Supabase SQL editor.
+-- Cần áp dụng migration 0017 trước khi chạy (publication + payment guard).
 --
 -- Seed trước khi chạy (thay các <...> bằng UUID thật):
 --   * auth users: platform admin (app_metadata.role=platform_admin), owner A, owner B,
@@ -8,11 +9,38 @@
 --   * staff_members active: owner A + waiter A + kitchen A thuộc store A; owner B thuộc store B.
 --   * store A/B, tables, menu_items; 1 order của store A (<order-a-id>),
 --     1 payment của chính order A (<payment-a-id>), 1 order của store B.
---   * <menu-item-a-id>: 1 món available của store A (test total_vnd).
+--   * <menu-item-a-id>: 1 món available của store A (test total_vnd + payment guard).
 --   * Có thể dùng store mẫu trong seed.sql: store ...101, bàn T01 ...501.
 -- Mọi assertion sai sẽ raise exception và rollback.
 
 begin;
+
+-- =========================================================
+-- 0. Realtime publication: orders + order_items
+-- =========================================================
+do $$
+declare n int;
+begin
+  select count(*) into n
+  from pg_publication_tables
+  where pubname = 'supabase_realtime'
+    and schemaname = 'public'
+    and tablename = 'orders';
+  if n <> 1 then
+    raise exception 'FAIL: orders chưa có trong publication supabase_realtime';
+  end if;
+
+  select count(*) into n
+  from pg_publication_tables
+  where pubname = 'supabase_realtime'
+    and schemaname = 'public'
+    and tablename = 'order_items';
+  if n <> 1 then
+    raise exception 'FAIL: order_items chưa có trong publication supabase_realtime';
+  end if;
+
+  raise notice 'PASS: orders/order_items có trong publication supabase_realtime';
+end $$;
 
 -- =========================================================
 -- 1. platform_admin: đọc platform-data được; store-data 0 dòng; không INSERT được
@@ -244,7 +272,124 @@ begin
 end $$;
 
 -- =========================================================
--- 6. Owner A: không xoá được đơn đã có payment (FK RESTRICT)
+-- 6. Payment total guard: chặn INSERT/UPDATE vượt total_vnd (23514)
+-- =========================================================
+do $$
+declare
+  v_order_id uuid := gen_random_uuid();
+  v_order_id2 uuid := gen_random_uuid();
+  v_payment_id uuid;
+  v_payment_id2 uuid;
+  v_price bigint;
+  v_total bigint;
+  v_total2 bigint;
+begin
+  -- Kiểm tra tĩnh: trigger phải khoá dòng orders để tránh 2 người thu cùng lúc.
+  if coalesce(
+    position(
+      'for update' in lower(pg_get_functiondef('public.guard_payment_total()'::regprocedure))
+    ),
+    0
+  ) = 0 then
+    raise exception 'FAIL: guard_payment_total thiếu FOR UPDATE';
+  end if;
+
+  select price_vnd into v_price
+  from public.menu_items
+  where id = '<menu-item-a-id>';
+  if v_price is null then
+    raise exception 'FAIL: thiếu <menu-item-a-id> để test payment guard';
+  end if;
+
+  -- Đơn 1: thu đủ, thử INSERT/UPDATE vượt tổng, rồi UPDATE giảm.
+  insert into public.orders (id, store_id, table_id, order_token)
+  values (v_order_id, '<store-a-id>', '<table-a-id>', gen_random_uuid());
+
+  insert into public.order_items (
+    store_id, order_id, menu_item_id, name_snapshot, unit_price_vnd, quantity
+  ) values (
+    '<store-a-id>', v_order_id, '<menu-item-a-id>', 'Test payment guard', v_price, 2
+  );
+
+  select total_vnd into v_total from public.orders where id = v_order_id;
+  if v_total <> v_price * 2 then
+    raise exception 'FAIL: total_vnd payment guard = %, mong đợi %', v_total, v_price * 2;
+  end if;
+  if v_total < 2 then
+    raise exception 'FAIL: total_vnd quá nhỏ để test payment guard';
+  end if;
+
+  insert into public.payments (store_id, order_id, method, amount_vnd)
+  values ('<store-a-id>', v_order_id, 'cash', v_total)
+  returning id into v_payment_id;
+
+  begin
+    insert into public.payments (store_id, order_id, method, amount_vnd)
+    values ('<store-a-id>', v_order_id, 'cash', 1);
+    raise exception 'FAIL: INSERT payment vượt tổng không bị chặn';
+  exception
+    when check_violation then
+      if sqlerrm not like '%vượt quá tổng tiền đơn%' then
+        raise exception 'FAIL: thông báo lỗi INSERT không đúng: %', sqlerrm;
+      end if;
+      raise notice 'PASS: chặn INSERT payment vượt tổng (23514)';
+  end;
+
+  begin
+    update public.payments
+    set amount_vnd = v_total + 1
+    where id = v_payment_id;
+    raise exception 'FAIL: UPDATE tăng amount_vnd vượt tổng không bị chặn';
+  exception
+    when check_violation then
+      if sqlerrm not like '%vượt quá tổng tiền đơn%' then
+        raise exception 'FAIL: thông báo lỗi UPDATE tăng không đúng: %', sqlerrm;
+      end if;
+      raise notice 'PASS: chặn UPDATE tăng amount_vnd vượt tổng (23514)';
+  end;
+
+  update public.payments
+  set amount_vnd = v_total - 1
+  where id = v_payment_id;
+  raise notice 'PASS: UPDATE giảm amount_vnd vẫn được';
+
+  -- Đơn 2: chưa thu (0 paid), tạo payment unpaid vượt tổng rồi đổi sang paid.
+  insert into public.orders (id, store_id, table_id, order_token)
+  values (v_order_id2, '<store-a-id>', '<table-a-id>', gen_random_uuid());
+
+  insert into public.order_items (
+    store_id, order_id, menu_item_id, name_snapshot, unit_price_vnd, quantity
+  ) values (
+    '<store-a-id>', v_order_id2, '<menu-item-a-id>', 'Test payment guard unpaid', v_price, 2
+  );
+
+  select total_vnd into v_total2 from public.orders where id = v_order_id2;
+  if v_total2 <> v_price * 2 then
+    raise exception 'FAIL: total_vnd payment guard unpaid = %, mong đợi %', v_total2, v_price * 2;
+  end if;
+
+  insert into public.payments (
+    store_id, order_id, payment_status, method, amount_vnd
+  ) values (
+    '<store-a-id>', v_order_id2, 'unpaid', 'cash', v_total2 + 1
+  ) returning id into v_payment_id2;
+
+  begin
+    update public.payments
+    set payment_status = 'paid'
+    where id = v_payment_id2;
+    raise exception 'FAIL: đổi unpaid -> paid vượt tổng không bị chặn';
+  exception
+    when check_violation then
+      if sqlerrm not like '%vượt quá tổng tiền đơn%' then
+        raise exception 'FAIL: thông báo lỗi đổi trạng thái không đúng: %', sqlerrm;
+      end if;
+      raise notice 'PASS: chặn đổi unpaid -> paid vượt tổng (23514)';
+  end;
+end $$;
+
+-- =========================================================
+-- 7. Owner A: không xoá được đơn đã có payment (FK RESTRICT)
 -- =========================================================
 do $$
 begin
@@ -258,7 +403,7 @@ begin
 end $$;
 
 -- =========================================================
--- 7. Khách (anon): chỉ đọc menu; orders/payments bị từ chối
+-- 8. Khách (anon): chỉ đọc menu; orders/payments bị từ chối
 -- =========================================================
 reset role;
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
