@@ -2,6 +2,14 @@ export const STAFF_ROLES = ["owner", "manager", "cashier", "waiter", "kitchen"] 
 
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
+export const ASSIGNABLE_STAFF_ROLES = ["manager", "cashier", "waiter", "kitchen"] as const;
+
+export type AssignableStaffRole = (typeof ASSIGNABLE_STAFF_ROLES)[number];
+
+export function isAssignableStaffRole(value: unknown): value is AssignableStaffRole {
+  return typeof value === "string" && (ASSIGNABLE_STAFF_ROLES as readonly string[]).includes(value);
+}
+
 export const ROLE_LABELS: Record<StaffRole, string> = {
   owner: "Chủ quán",
   manager: "Quản lý",
@@ -73,6 +81,10 @@ export function canManageStaff(role: StaffRole) {
   return hasRole(role, ["owner"]);
 }
 
-export function canManageStore(role: StaffRole) {
+export function canViewSettings(role: StaffRole) {
+  return hasRole(role, ["owner", "manager", "cashier", "waiter", "kitchen"]);
+}
+
+export function canManageSettings(role: StaffRole) {
   return hasRole(role, ["owner"]);
 }

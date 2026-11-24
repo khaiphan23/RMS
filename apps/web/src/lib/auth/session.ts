@@ -29,7 +29,7 @@ export const getStaffContext = cache(async (): Promise<StaffContext> => {
 
   const email = user.email ?? null;
 
-  // Chỉ tin app_metadata (service_role/admin API ghi), không dùng user_metadata.
+  // Chỉ tin app_metadata (admin API ghi), không dùng user_metadata.
   if (user.app_metadata?.role === "platform_admin") {
     return { kind: "platform_admin", userId: user.id, email };
   }
