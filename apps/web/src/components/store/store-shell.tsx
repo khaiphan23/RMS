@@ -6,12 +6,12 @@ import type { ReactNode } from "react";
 
 import { logoutAction } from "@/lib/auth/actions";
 import {
-  canManageStore,
   canViewKitchen,
   canViewMenu,
   canViewOrders,
   canViewPayments,
   canViewReports,
+  canViewSettings,
   canViewStaff,
   canViewTables,
   ROLE_LABELS,
@@ -36,7 +36,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard/payments", label: "Thanh toán", visible: canViewPayments },
   { href: "/dashboard/reports", label: "Báo cáo", visible: canViewReports },
   { href: "/dashboard/staff", label: "Nhân viên", visible: canViewStaff },
-  { href: "/dashboard/settings", label: "Cài đặt", visible: canManageStore },
+  { href: "/dashboard/settings", label: "Cài đặt", visible: canViewSettings },
 ];
 
 function isActive(pathname: string, href: string) {
