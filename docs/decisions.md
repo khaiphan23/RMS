@@ -39,3 +39,7 @@ Platform admin KHÔNG được truy cập: đơn hàng, doanh thu, menu chi ti�
 ## 9. Đổi tên vai trò quản trị nền tảng
 
 `platform_admin` là tên chính thức, thay cho `super_admin` ở mục 7.
+
+## 10. Luồng khách qua hàm RPC
+
+Khách đặt món và xem trạng thái đơn chỉ thông qua hàm RPC `public.place_order` / `public.get_order_status` trong migration `0018_customer_rpc.sql`. Không dùng `service_role` ở luồng khách. Không mở thêm quyền SELECT/INSERT trực tiếp cho anon trên bảng `orders`, `order_items`, `payments`, `menu_items`; khách chỉ gọi hàm RPC, hàm tự kiểm tra quyền/nghiệp vụ và chặn `platform_admin` đọc đơn qua `get_order_status`.
