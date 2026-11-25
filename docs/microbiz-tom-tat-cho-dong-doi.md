@@ -1,4 +1,4 @@
-**MICROBIZ**
+**RMS**
 
 **Nền tảng đặt món, quản lý quán và thanh toán bằng QR**
 
