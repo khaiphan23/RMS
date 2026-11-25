@@ -47,7 +47,7 @@ export function LoginForm({ next }: { next: string }) {
       }
 
       if (auth.user.app_metadata?.role === "platform_admin") {
-        window.location.assign("/admin");
+        window.location.assign(next === "/admin" || next.startsWith("/admin/") || next.startsWith("/admin?") ? next : "/admin");
         return;
       }
 
@@ -67,7 +67,8 @@ export function LoginForm({ next }: { next: string }) {
       }
 
       // Điều hướng full-page để middleware và server component đọc cookie mới.
-      window.location.assign(staff ? next : "/dashboard/unassigned");
+      const dashboard = next.startsWith("/dashboard") ? next : "/dashboard";
+      window.location.assign(staff ? dashboard : "/dashboard/unassigned");
     } catch {
       setError("Không kết nối được Supabase. Kiểm tra mạng rồi thử lại.");
       setPending(false);
