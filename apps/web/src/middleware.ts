@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { type NextRequest } from "next/server";
 
 import { redirectWithSession, updateSession } from "@/lib/supabase/middleware";
 
@@ -15,7 +15,17 @@ export async function middleware(request: NextRequest) {
     return redirectWithSession(url, response);
   }
 
-  if (user.app_metadata?.role === "platform_admin") {
+  const isAdmin = user.app_metadata?.role === "platform_admin";
+  const isAdminPath = pathname === "/admin" || pathname.startsWith("/admin/");
+  if (isAdminPath) {
+    if (isAdmin) return response;
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    url.search = "";
+    return redirectWithSession(url, response);
+  }
+
+  if (isAdmin) {
     const url = request.nextUrl.clone();
     url.pathname = "/admin";
     url.search = "";
@@ -45,5 +55,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/admin/:path*"],
 };

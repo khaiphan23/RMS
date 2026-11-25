@@ -7,7 +7,9 @@ export default async function LoginPage({
 }) {
   const params = await searchParams;
   const requested = typeof params.next === "string" ? params.next : "/dashboard";
-  const next = /^\/dashboard(?:\/|$)/.test(requested) ? requested : "/dashboard";
+  const next = /^\/(?:dashboard|admin)(?=\/|\?|$)/.test(requested) && !requested.includes("\\")
+    ? requested
+    : "/dashboard";
 
   return <LoginForm next={next} />;
 }

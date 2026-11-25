@@ -1,0 +1,27 @@
+.shell {
+  margin: auto;
+  max-width: 74rem;
+  padding: clamp(.8rem, 3vw, 2rem);
+  color: #172622;
+  font-family: system-ui, sans-serif;
+}
+.header, .nav, .row { display: flex; flex-wrap: wrap; align-items: center; gap: .85rem; }
+.header { justify-content: space-between; border-bottom: 1px solid #dce6df; padding-bottom: .85rem; }
+.nav { margin-top: 1rem; }
+.nav a { padding: .45rem .65rem; border-radius: .4rem; color: #175648; }
+.nav a[aria-current] { background: #e4f1eb; color: #124639; font-weight: 700; }
+.panel { border: 1px solid #dce6df; border-radius: .65rem; padding: .85rem 1rem; margin-block: .8rem; }
+.panel summary { cursor: pointer; font-weight: 600; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .8rem; }
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .8rem; margin-block: .85rem; }
+.fields label { display: grid; align-content: start; gap: .3rem; font-size: .92rem; }
+.shell input:not([type=checkbox]), .shell select {
+  box-sizing: border-box; min-width: 0; padding: .5rem; border: 1px solid #aebeb5; border-radius: .35rem; font: inherit;
+}
+.shell button { padding: .55rem .8rem; border: 0; border-radius: .4rem; background: #185c48; color: white; font: inherit; cursor: pointer; }
+.shell button:disabled { opacity: .65; cursor: default; }
+.error { color: #a01c27; }
+.muted { color: #4c5e55; }
+.tableWrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; text-align: left; }
+.table :is(th, td) { padding: .65rem; border-bottom: 1px solid #dce6df; }
