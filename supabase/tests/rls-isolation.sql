@@ -1,7 +1,7 @@
 -- Kiểm tra RLS thủ công trên DB test (Supabase local/staging), KHÔNG chạy production.
 -- Cách chạy: psql "$DATABASE_URL" -f supabase/tests/rls-isolation.sql
 --       hoặc dán vào Supabase SQL editor.
--- Cần áp dụng migration 0017 trước khi chạy (publication + payment guard).
+-- Cần áp dụng migration 0019-0021 trước khi chạy (customer RPC + reliability + hardening).
 --
 -- Seed trước khi chạy (thay các <...> bằng UUID thật):
 --   * auth users: platform admin (app_metadata.role=platform_admin), owner A, owner B,
@@ -404,7 +404,7 @@ begin
 end $$;
 
 -- =========================================================
--- 8. Khách (anon): chỉ đọc menu; orders/payments bị từ chối
+-- 8. Khách (anon): không đọc trực tiếp bảng; chỉ gọi RPC
 -- =========================================================
 reset role;
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
@@ -412,15 +412,31 @@ select set_config('request.headers', '{"x-order-token":"<order-token-a>"}', true
 set local role anon;
 
 do $$
-declare n bigint;
+declare
+  v_blocked boolean := false;
 begin
-  select count(*) into n from public.menu_items;
-  if n = 0 then raise exception 'FAIL: anon không đọc được menu_items'; end if;
+  begin
+    perform count(*) from public.menu_items;
+  exception
+    when insufficient_privilege then
+      v_blocked := true;
+  end;
+  if not v_blocked then
+    raise exception 'FAIL: anon đọc trực tiếp được menu_items';
+  end if;
 
-  select count(*) into n from public.menu_categories;
-  if n = 0 then raise exception 'FAIL: anon không đọc được menu_categories'; end if;
+  v_blocked := false;
+  begin
+    perform count(*) from public.menu_categories;
+  exception
+    when insufficient_privilege then
+      v_blocked := true;
+  end;
+  if not v_blocked then
+    raise exception 'FAIL: anon đọc trực tiếp được menu_categories';
+  end if;
 
-  raise notice 'PASS: anon đọc được menu (RLS chỉ món available / nhóm active)';
+  raise notice 'PASS: anon bị từ chối SELECT trực tiếp menu_items/menu_categories';
 end $$;
 
 do $$
@@ -485,6 +501,8 @@ declare
   v_total bigint;
   v_order_id uuid;
   v_unit_price bigint;
+  v_menu jsonb;
+  v_blocked boolean;
   i int;
 begin
   select sr.slug into v_store_slug from public.store_registry sr where sr.id = v_store_a_id;
@@ -492,6 +510,16 @@ begin
 
   select price_vnd into v_price from public.menu_items where id = v_item_a_id;
   if v_price is null then raise exception 'FAIL: thiếu <menu-item-a-id> để test RPC'; end if;
+
+  -- 9.0 Anon vẫn đọc menu được qua RPC sau khi revoke SELECT trực tiếp.
+  v_menu := public.get_table_menu(v_store_slug, v_table_code);
+  if v_menu->>'store_id' is null then
+    raise exception 'FAIL: get_table_menu không trả store_id';
+  end if;
+  if pg_catalog.jsonb_typeof(v_menu->'categories') <> 'array' then
+    raise exception 'FAIL: get_table_menu không trả categories';
+  end if;
+  raise notice 'PASS: anon đọc menu qua get_table_menu';
 
   -- 9.1 Giá lấy từ DB, RPC không nhận giá từ client.
   select public.place_order(
@@ -515,6 +543,7 @@ begin
   raise notice 'PASS: place_order lấy giá từ DB và tạo đơn';
 
   -- 9.2 Món của quán khác bị từ chối.
+  v_blocked := false;
   begin
     select public.place_order(
       v_store_slug, v_table_code,
@@ -523,11 +552,14 @@ begin
       )),
       '', gen_random_uuid()
     );
-    raise exception 'FAIL: place_order chấp nhận món của quán khác';
   exception
     when others then
-      raise notice 'PASS: place_order từ chối món của quán khác';
+      v_blocked := true;
   end;
+  if not v_blocked then
+    raise exception 'FAIL: place_order chấp nhận món của quán khác';
+  end if;
+  raise notice 'PASS: place_order từ chối món của quán khác';
 
   -- 9.3 Giới hạn 5 đơn pending trên bàn trong 10 phút.
   -- Đơn v_test_token ở 9.1 đã tạo 1 đơn pending, nên lặp thêm 4 đơn để đạt 5.
@@ -541,6 +573,7 @@ begin
     );
   end loop;
 
+  v_blocked := false;
   begin
     select public.place_order(
       v_store_slug, v_table_code,
@@ -549,13 +582,17 @@ begin
       )),
       '', gen_random_uuid()
     );
-    raise exception 'FAIL: place_order chấp nhận đơn thứ 6 pending trong 10 phút';
   exception
     when others then
-      raise notice 'PASS: place_order từ chối đơn thứ 6 pending trong 10 phút';
+      v_blocked := true;
   end;
+  if not v_blocked then
+    raise exception 'FAIL: place_order chấp nhận đơn thứ 6 pending trong 10 phút';
+  end if;
+  raise notice 'PASS: place_order từ chối đơn thứ 6 pending trong 10 phút';
 
   -- 9.3b Mã đơn ngắn (10 ký tự) bị place_order từ chối rõ ràng.
+  v_blocked := false;
   begin
     select public.place_order(
       v_store_slug, v_table_code,
@@ -564,11 +601,14 @@ begin
       )),
       '', 'short-token'
     );
-    raise exception 'FAIL: place_order chấp nhận mã đơn ngắn';
   exception
     when others then
-      raise notice 'PASS: place_order từ chối mã đơn ngắn';
+      v_blocked := true;
   end;
+  if not v_blocked then
+    raise exception 'FAIL: place_order chấp nhận mã đơn ngắn';
+  end if;
+  raise notice 'PASS: place_order từ chối mã đơn ngắn';
 
   -- 9.4 Trạng thái đơn đúng token.
   declare
@@ -646,7 +686,27 @@ begin
   end if;
 end $$;
 
--- 9.7 Platform admin KHÔNG dùng get_order_status để đọc đơn của quán.
+-- Tạo bàn tạm cho test platform admin place_order (rollback ở cuối file).
+-- Chạy khi vẫn là owner A, trước khi đổi JWT sang platform_admin.
+select set_config('rms.test_store_slug', sr.slug, true)
+from public.store_registry sr
+where sr.id = '<store-a-id>';
+
+with new_table as (
+  insert into public.tables (store_id, table_code, name, seats, active)
+  values (
+    '<store-a-id>',
+    'PA-' || pg_catalog.substr(gen_random_uuid()::text, 1, 8),
+    'Test platform admin',
+    1,
+    true
+  )
+  returning table_code
+)
+select set_config('rms.test_pa_table_code', table_code, true)
+from new_table;
+
+-- 9.7 Platform admin KHÔNG dùng get_order_status/get_table_menu/place_order.
 select set_config(
   'request.jwt.claims',
   '{"sub":"<platform-admin-user-id>","role":"authenticated","app_metadata":{"role":"platform_admin"}}',
@@ -655,12 +715,177 @@ select set_config(
 set local role authenticated;
 
 do $$
+declare
+  v_blocked boolean := false;
 begin
-  perform public.get_order_status('11111111-1111-1111-1111-111111111111');
-  raise exception 'FAIL: platform_admin dùng được get_order_status';
-exception
-  when others then
-    raise notice 'PASS: platform_admin không dùng được get_order_status';
+  begin
+    perform public.get_order_status('11111111-1111-1111-1111-111111111111');
+  exception
+    when others then
+      v_blocked := true;
+  end;
+  if not v_blocked then
+    raise exception 'FAIL: platform_admin dùng được get_order_status';
+  end if;
+  raise notice 'PASS: platform_admin không dùng được get_order_status';
+end $$;
+
+do $$
+declare
+  v_menu jsonb;
+  v_slug text := current_setting('rms.test_store_slug', true);
+  v_table text := current_setting('rms.test_pa_table_code', true);
+begin
+  if v_slug is null or v_table is null then
+    raise exception 'FAIL: thiếu target để test platform_admin get_table_menu';
+  end if;
+
+  v_menu := public.get_table_menu(v_slug, v_table);
+  if v_menu <> '{}'::jsonb then
+    raise exception 'FAIL: platform_admin đọc được get_table_menu';
+  end if;
+  raise notice 'PASS: platform_admin bị chặn get_table_menu';
+end $$;
+
+do $$
+declare
+  v_slug text := current_setting('rms.test_store_slug', true);
+  v_table text := current_setting('rms.test_pa_table_code', true);
+  v_blocked boolean := false;
+begin
+  if v_slug is null or v_table is null then
+    raise exception 'FAIL: thiếu target để test platform_admin place_order';
+  end if;
+
+  begin
+    perform public.place_order(
+      v_slug,
+      v_table,
+      pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
+        'menu_item_id', '<menu-item-a-id>',
+        'quantity', 1
+      )),
+      '',
+      '33333333-3333-3333-3333-333333333333'
+    );
+  exception
+    when others then
+      if sqlerrm not like '%Platform admin%' then
+        raise exception 'FAIL: place_order lỗi khác: %', sqlerrm;
+      end if;
+      v_blocked := true;
+  end;
+
+  if not v_blocked then
+    raise exception 'FAIL: platform_admin tạo được đơn';
+  end if;
+  raise notice 'PASS: platform_admin bị chặn place_order';
+end $$;
+
+-- =========================================================
+-- 10. Owner A: không ghi order_items của đơn đã completed
+-- =========================================================
+select set_config(
+  'request.jwt.claims',
+  '{"sub":"<owner-a-user-id>","role":"authenticated"}',
+  true
+);
+set local role authenticated;
+
+do $$
+declare
+  v_blocked boolean := false;
+  v_count int;
+begin
+  update public.orders set order_status = 'completed' where id = '<order-a-id>';
+
+  begin
+    insert into public.order_items (
+      store_id, order_id, menu_item_id, name_snapshot, unit_price_vnd, quantity
+    ) values (
+      '<store-a-id>', '<order-a-id>', '<menu-item-a-id>', 'Test blocked', 1000, 1
+    );
+  exception
+    when insufficient_privilege then
+      v_blocked := true;
+  end;
+  if not v_blocked then
+    raise exception 'FAIL: owner A insert được order_items của đơn completed';
+  end if;
+  raise notice 'PASS: insert order_items bị chặn sau completed';
+
+  update public.orders set order_status = 'cancelled' where id = '<order-a-id>';
+
+  v_blocked := false;
+  begin
+    insert into public.order_items (
+      store_id, order_id, menu_item_id, name_snapshot, unit_price_vnd, quantity
+    ) values (
+      '<store-a-id>', '<order-a-id>', '<menu-item-a-id>', 'Test blocked', 1000, 1
+    );
+  exception
+    when insufficient_privilege then
+      v_blocked := true;
+  end;
+  if not v_blocked then
+    raise exception 'FAIL: owner A insert được order_items của đơn cancelled';
+  end if;
+  raise notice 'PASS: insert order_items bị chặn sau cancelled';
+
+  update public.order_items
+  set quantity = quantity + 1
+  where order_id = '<order-a-id>';
+  get diagnostics v_count = row_count;
+  if v_count <> 0 then
+    raise exception 'FAIL: owner A update được order_items của đơn completed/cancelled';
+  end if;
+  raise notice 'PASS: update order_items bị chặn sau completed/cancelled';
+
+  delete from public.order_items where order_id = '<order-a-id>';
+  get diagnostics v_count = row_count;
+  if v_count <> 0 then
+    raise exception 'FAIL: owner A delete được order_items của đơn completed/cancelled';
+  end if;
+  raise notice 'PASS: delete order_items bị chặn sau completed/cancelled';
+end $$;
+
+-- =========================================================
+-- 11. Owner A: chỉ đọc plan gắn với subscription của quán mình
+-- =========================================================
+do $$
+declare
+  n_sub bigint;
+  n_own bigint;
+  n_total bigint;
+begin
+  select count(*) into n_sub
+  from public.subscriptions
+  where store_id = '<store-a-id>';
+
+  if n_sub = 0 then
+    raise notice 'SKIP: store A chưa có subscription để test owner đọc plans';
+    return;
+  end if;
+
+  select count(*) into n_own
+  from public.plans p
+  where exists (
+    select 1
+    from public.subscriptions s
+    where s.plan_id = p.id
+      and s.store_id = '<store-a-id>'
+  );
+
+  if n_own = 0 then
+    raise exception 'FAIL: owner A không đọc được plan của quán mình';
+  end if;
+
+  select count(*) into n_total from public.plans;
+  if n_total <> n_own then
+    raise exception 'FAIL: owner A đọc được plan ngoài subscription của quán';
+  end if;
+
+  raise notice 'PASS: owner A chỉ đọc plan của quán mình';
 end $$;
 
 reset role;

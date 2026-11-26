@@ -120,16 +120,16 @@ export function StaffManager({
   }
 
   function toggleActive(member: StaffMemberView) {
-    const action = member.active ? "khoá" : "mở khoá";
+    const action = member.active ? "Tạm ngưng" : "Mở lại";
     const name = member.displayName || member.email || "nhân viên này";
 
-    if (!window.confirm(`${action[0].toUpperCase()}${action.slice(1)} tài khoản của ${name}?`)) {
+    if (!window.confirm(`${action} quyền truy cập quán của ${name}?`)) {
       return;
     }
 
     run(
       () => setStaffActive({ staffId: member.id, active: !member.active }),
-      member.active ? "Đã khoá nhân viên." : "Đã mở khoá nhân viên.",
+      member.active ? "Đã tạm ngưng quyền truy cập quán." : "Đã mở lại quyền truy cập quán.",
     );
   }
 
@@ -198,6 +198,7 @@ export function StaffManager({
             <thead>
               <tr>
                 <th style={thStyle}>Nhân viên</th>
+                <th style={thStyle}>Email</th>
                 <th style={thStyle}>Vai trò</th>
                 <th style={thStyle}>Trạng thái</th>
                 {canManage ? <th style={thStyle}>Thao tác</th> : null}
@@ -211,10 +212,10 @@ export function StaffManager({
                       {member.displayName || "Chưa đặt tên"}
                       {member.isSelf ? <span style={mutedStyle}> (bạn)</span> : null}
                     </div>
-                    <div style={mutedStyle}>
-                      {member.email ||
-                        (canManage ? "Không tải được email" : "Chỉ chủ quán xem email")}
-                    </div>
+                  </td>
+                  <td style={tdStyle}>
+                    {member.email ||
+                      (canManage ? "Không tải được email" : "Chỉ chủ quán xem email")}
                   </td>
                   <td style={tdStyle}>
                     {canManage && member.role !== "owner" && !member.isSelf ? (

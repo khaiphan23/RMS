@@ -255,13 +255,6 @@ export async function setStaffActive(input: {
   }
   if (target.active === input.active) return { ok: true };
 
-  let admin: ReturnType<typeof createAdminClient>;
-  try {
-    admin = createAdminClient();
-  } catch {
-    return fail("Chưa cấu hình quyền quản trị để khoá/mở khoá nhân viên.");
-  }
-
   const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from("staff_members")
@@ -273,20 +266,6 @@ export async function setStaffActive(input: {
 
   if (error) return fail(friendlyDbError(error));
   if (!data) return fail("Không tìm thấy nhân viên trong quán.");
-
-  const { error: authErrorResult } = await admin.auth.admin.updateUserById(target.user_id, {
-    ban_duration: input.active ? "none" : "876000h",
-  });
-
-  if (authErrorResult) {
-    await supabase
-      .from("staff_members")
-      .update({ active: target.active })
-      .eq("id", target.id)
-      .eq("store_id", staff.storeId);
-
-    return fail("Không cập nhật được trạng thái đăng nhập. Vui lòng thử lại.");
-  }
 
   revalidatePath("/dashboard/staff");
   return { ok: true };

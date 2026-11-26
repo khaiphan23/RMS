@@ -76,7 +76,12 @@ export default async function ReportsPage() {
 
   const supabase = await createServerSupabaseClient();
   const now = new Date();
-  const startIso = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000).toISOString();
+  // A-05: 30 ngày lịch theo giờ Việt Nam, bắt đầu từ 00:00 ngày đầu tiên.
+  const dayKeys = Array.from({ length: 30 }, (_, index) => {
+    const date = new Date(now.getTime() - (29 - index) * 24 * 60 * 60 * 1000);
+    return vnDateKey(date);
+  });
+  const startIso = new Date(`${dayKeys[0]}T00:00:00+07:00`).toISOString();
 
   const [ordersResult, paymentsResult] = await Promise.all([
     supabase
@@ -106,6 +111,7 @@ export default async function ReportsPage() {
 
   const orders = (ordersResult.data ?? []) as OrderRow[];
   const payments = (paymentsResult.data ?? []) as PaymentRow[];
+  // Doanh thu theo tiền đã thu, kể cả đơn sau đó bị huỷ; hoàn tiền phải ghi refunded.
   const validOrders = orders.filter((order) => order.order_status !== "cancelled");
   const validOrderIds = new Set(validOrders.map((order) => order.id));
 
@@ -129,11 +135,6 @@ export default async function ReportsPage() {
   const items = ((itemData ?? []) as ItemRow[]).filter((item) =>
     validOrderIds.has(item.order_id),
   );
-
-  const dayKeys = Array.from({ length: 30 }, (_, index) => {
-    const date = new Date(now.getTime() - (29 - index) * 24 * 60 * 60 * 1000);
-    return vnDateKey(date);
-  });
 
   const revenueByDay = new Map(dayKeys.map((key) => [key, 0]));
   const ordersByDay = new Map(dayKeys.map((key) => [key, 0]));
@@ -187,8 +188,8 @@ export default async function ReportsPage() {
       />
 
       <Notice tone="info">
-        Doanh thu tính từ payments trạng thái paid; số đơn và món bán chạy không gồm đơn
-        đã huỷ.
+        Doanh thu tính từ payments đã thu, kể cả đơn sau đó bị huỷ; số đơn và món bán
+        chạy không gồm đơn đã huỷ. Hoàn tiền phải ghi refunded để giảm doanh thu.
       </Notice>
 
       <div style={gridStyle}>
