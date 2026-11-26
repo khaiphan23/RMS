@@ -8,13 +8,13 @@ import { fetchOrderFeed, type OrderView } from "@/lib/supabase/orders";
 
 const POLL_MS = 5000;
 
-export function useOrderFeed(storeId: string, initialOrders: OrderView[]) {
+export function useOrderFeed(storeId: string, initialOrders: OrderView[], kitchenOnly = false) {
   const [orders, setOrders] = useState(initialOrders);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const supabase = createBrowserSupabaseClient();
-    const result = await fetchOrderFeed(supabase, storeId);
+    const result = await fetchOrderFeed(supabase, storeId, kitchenOnly);
 
     if (result.error) {
       setError(friendlyDbError(result.error));
@@ -23,14 +23,14 @@ export function useOrderFeed(storeId: string, initialOrders: OrderView[]) {
 
     setOrders(result.orders);
     setError(null);
-  }, [storeId]);
+  }, [storeId, kitchenOnly]);
 
   useEffect(() => {
     const supabase = createBrowserSupabaseClient();
 
     // Realtime cần bảng nằm trong publication; nếu chưa cấu hình thì polling bên dưới vẫn chạy.
     const channel = supabase
-      .channel(`order-feed-${storeId}`)
+      .channel(`order-feed-${storeId}-${kitchenOnly ? "kitchen" : "orders"}`)
       .on(
         "postgres_changes",
         {

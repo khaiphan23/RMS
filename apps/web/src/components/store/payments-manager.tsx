@@ -265,7 +265,7 @@ export function PaymentsManager({
       <section style={{ display: "grid", gap: 10 }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>Đơn cần thu ({openOrders.length})</h2>
         {openOrders.length === 0 ? (
-          <EmptyState>Không còn đơn cần thu trong danh sách gần đây.</EmptyState>
+          <EmptyState>Không còn đơn cần thu.</EmptyState>
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {openOrders.map((order) => (

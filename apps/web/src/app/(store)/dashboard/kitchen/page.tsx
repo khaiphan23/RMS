@@ -22,7 +22,7 @@ export default async function KitchenPage() {
   }
 
   const supabase = await createServerSupabaseClient();
-  const { orders, error } = await fetchOrderFeed(supabase, staff.storeId);
+  const { orders, error } = await fetchOrderFeed(supabase, staff.storeId, true);
 
   if (error) {
     return (
