@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/supabase/errors";
 import { ORDER_STATUS_LABELS } from "@/lib/supabase/types";
 import { orderTokenKey } from "./cart-context";
 import { currency, type CustomerOrder } from "./types";
@@ -52,14 +53,18 @@ export function OrderStatusView({ tablePath, queryToken }: {
         });
         if (!active) return;
         if (rpcError) {
-          setError(rpcError.message);
+          setError(friendlyDbError(rpcError, "Không tải được trạng thái đơn. Vui lòng thử lại."));
           return;
         }
 
         const result = data as CustomerOrder | null;
         setError("");
         setOrder(result);
-        if (!result || result.order_status === "completed" || result.order_status === "cancelled") {
+        if (
+          !result ||
+          result.order_status === "cancelled" ||
+          (result.order_status === "completed" && result.payment_status === "paid")
+        ) {
           window.clearInterval(interval);
         }
       } catch {
