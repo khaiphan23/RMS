@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 import { buildTablePath } from "@/lib/qr/links";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { friendlyDbError } from "@/lib/supabase/errors";
 import { orderTokenKey, useCart } from "./cart-context";
 import { currency, type TableRoute } from "./types";
 import styles from "./customer.module.css";
@@ -46,7 +47,7 @@ export function Cart({ storeSlug, tableCode }: TableRoute) {
         p_order_token: token,
       });
       if (rpcError) {
-        setError(rpcError.message);
+        setError(friendlyDbError(rpcError, "Không gửi được đơn. Vui lòng thử lại."));
         return;
       }
 
@@ -58,8 +59,8 @@ export function Cart({ storeSlug, tableCode }: TableRoute) {
 
       clear();
       router.replace(`${path}/order-status?token=${encodeURIComponent(token)}`);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Không gửi được đơn. Vui lòng thử lại.");
+    } catch {
+      setError("Không gửi được đơn. Vui lòng thử lại.");
     } finally {
       sending.current = false;
       setPending(false);
