@@ -162,20 +162,23 @@ export function KitchenBoard({
   storeId: string;
   initialOrders: OrderView[];
 }) {
-  const { orders, error, refresh } = useOrderFeed(storeId, initialOrders);
+  const { orders, error, refresh } = useOrderFeed(storeId, initialOrders, true);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, startTransition] = useTransition();
 
   const active = orders
     .filter(
       (order) =>
-        order.order_status === "pending" || order.order_status === "preparing",
+        order.order_status === "pending" || order.order_status === "confirmed" ||
+        order.order_status === "preparing",
     )
     .sort(
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
     );
 
-  const pending = active.filter((order) => order.order_status === "pending");
+  const pending = active.filter(
+    (order) => order.order_status === "pending" || order.order_status === "confirmed",
+  );
   const preparing = active.filter((order) => order.order_status === "preparing");
 
   function changeStatus(orderId: string, status: OrderStatus) {

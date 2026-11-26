@@ -63,14 +63,20 @@ export async function updateOrderStatus(
   }
 
   // Bếp chỉ gửi đúng cột order_status; trigger sẽ chặn nếu gửi thêm cột khác.
-  const { error: updateError } = await supabase
+  const { data: updated, error: updateError } = await supabase
     .from("orders")
     .update({ order_status: nextStatus })
     .eq("id", orderId)
-    .eq("store_id", staff.storeId);
+    .eq("store_id", staff.storeId)
+    .eq("order_status", order.order_status)
+    .select("id")
+    .maybeSingle();
 
   if (updateError) {
     return { ok: false, error: friendlyDbError(updateError) };
+  }
+  if (!updated) {
+    return { ok: false, error: "Đơn đã thay đổi. Tải lại danh sách trước khi cập nhật." };
   }
 
   revalidatePath("/dashboard/orders");

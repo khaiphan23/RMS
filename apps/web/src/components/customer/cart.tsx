@@ -24,6 +24,7 @@ export function Cart({ storeSlug, tableCode }: TableRoute) {
   const { cart, ready, setQuantity, setNote, clear } = useCart();
   const router = useRouter();
   const sending = useRef(false);
+  const attempt = useRef<{ payload: string; token: string } | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const path = buildTablePath(storeSlug, tableCode);
@@ -37,12 +38,38 @@ export function Cart({ storeSlug, tableCode }: TableRoute) {
     setError("");
 
     try {
-      const token = newOrderToken();
+      const items = cart.lines.map(({ id, quantity }) => ({ menu_item_id: id, quantity }));
+      const note = cart.note.trim() || null;
+      const payload = JSON.stringify({ items, note });
+      const attemptKey = `microbiz:order-attempt:${path}`;
+
+      if (attempt.current?.payload !== payload) {
+        try {
+          const saved = JSON.parse(localStorage.getItem(attemptKey) ?? "null");
+          if (saved?.payload === payload && typeof saved.token === "string" &&
+              /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(saved.token)) {
+            attempt.current = { payload, token: saved.token };
+          }
+        } catch {
+          // Storage is optional. The in-memory attempt still covers retries on this page.
+        }
+      }
+
+      if (attempt.current?.payload !== payload) {
+        attempt.current = { payload, token: newOrderToken() };
+      }
+      const { token } = attempt.current;
+      try {
+        localStorage.setItem(attemptKey, JSON.stringify(attempt.current));
+      } catch {
+        // Keep the attempt in memory.
+      }
+
       const { error: rpcError } = await createBrowserSupabaseClient().rpc("place_order", {
         p_store_slug: storeSlug,
         p_table_code: tableCode,
-        p_items: cart.lines.map(({ id, quantity }) => ({ menu_item_id: id, quantity })),
-        p_note: cart.note.trim() || null,
+        p_items: items,
+        p_note: note,
         p_order_token: token,
       });
       if (rpcError) {
@@ -56,6 +83,12 @@ export function Cart({ storeSlug, tableCode }: TableRoute) {
         // The status URL still carries the token when storage is unavailable.
       }
 
+      attempt.current = null;
+      try {
+        localStorage.removeItem(attemptKey);
+      } catch {
+        // The completed order is still available through the status URL.
+      }
       clear();
       router.replace(`${path}/order-status?token=${encodeURIComponent(token)}`);
     } catch (error) {

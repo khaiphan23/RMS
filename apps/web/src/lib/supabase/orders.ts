@@ -35,58 +35,17 @@ export type OrderFeedResult = {
   error: unknown | null;
 };
 
-type OrderRow = Omit<OrderView, "table" | "items">;
-
 export async function fetchOrderFeed(
   supabase: SupabaseClient,
   storeId: string,
+  kitchenOnly = false,
 ): Promise<OrderFeedResult> {
-  const { data: orderRows, error: ordersError } = await supabase
-    .from("orders")
-    .select("id, table_id, order_status, total_vnd, note, customer_name, created_at")
-    .eq("store_id", storeId)
-    .order("created_at", { ascending: false })
-    .limit(100);
+  const { data, error } = await supabase.rpc("get_store_order_feed", {
+    p_store_id: storeId,
+    p_kitchen_only: kitchenOnly,
+  });
 
-  if (ordersError) return { orders: [], error: ordersError };
-
-  const rows = (orderRows ?? []) as OrderRow[];
-  if (rows.length === 0) return { orders: [], error: null };
-
-  const orderIds = rows.map((order) => order.id);
-  const [itemsResult, tablesResult] = await Promise.all([
-    supabase
-      .from("order_items")
-      .select(
-        "id, order_id, name_snapshot, unit_price_vnd, quantity, line_total_vnd, created_at",
-      )
-      .in("order_id", orderIds)
-      .order("created_at", { ascending: true }),
-    supabase.from("tables").select("id, table_code, name").eq("store_id", storeId),
-  ]);
-
-  const error = itemsResult.error ?? tablesResult.error;
-  if (error) return { orders: [], error };
-
-  const tableMap = new Map(
-    ((tablesResult.data ?? []) as OrderTableView[]).map((table) => [table.id, table]),
-  );
-
-  const itemsByOrder = new Map<string, OrderItemView[]>();
-  for (const item of (itemsResult.data ?? []) as OrderItemView[]) {
-    const list = itemsByOrder.get(item.order_id) ?? [];
-    list.push(item);
-    itemsByOrder.set(item.order_id, list);
-  }
-
-  return {
-    orders: rows.map((order) => ({
-      ...order,
-      table: tableMap.get(order.table_id) ?? null,
-      items: itemsByOrder.get(order.id) ?? [],
-    })),
-    error: null,
-  };
+  return { orders: (data ?? []) as OrderView[], error };
 }
 
 export type OrderAction = {
@@ -121,7 +80,7 @@ export const ORDER_NEXT_ACTIONS: Record<OrderStatus, OrderAction[]> = {
 export const KITCHEN_NEXT_ACTIONS: Record<OrderStatus, OrderAction[]> = {
   pending: [{ status: "preparing", label: "Bắt đầu chuẩn bị" }],
   preparing: [{ status: "ready", label: "Đánh dấu sẵn sàng" }],
-  confirmed: [],
+  confirmed: [{ status: "preparing", label: "Bắt đầu chuẩn bị" }],
   ready: [],
   completed: [],
   cancelled: [],

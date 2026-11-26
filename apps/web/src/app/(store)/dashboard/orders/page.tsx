@@ -29,7 +29,7 @@ export default async function OrdersPage() {
     <div style={pageStyle}>
       <PageHeader
         title="Đơn hàng"
-        description={`${staff.storeName} · ${orders.length} đơn gần nhất`}
+        description={`${staff.storeName} · ${orders.length} đơn hiển thị`}
       />
 
       {!canUpdate ? (
